@@ -1,5 +1,6 @@
-#20250814PM1716,雅
+#20250814PM2041,雅
 # app.pPMy
+from sqlalchemy import text
 import os, json
 from datetime import datetime, timezone
 from fastapi import FastAPI, Depends, Body, HTTPException
@@ -19,15 +20,15 @@ def on_startup():
 
 @app.get("/db/health")
 def db_health():
-    if SessionLocal is None:
-        raise HTTPException(status_code=503, detail="DATABASE_URL not configured")
     try:
         with SessionLocal() as s:
-            s.execute("SELECT 1")
+            # SQLAlchemy 2.0 規則：字串 SQL 要用 text(...)
+            s.execute(text("SELECT 1"))
         return {"status": "ok"}
     except Exception as e:
-        print(f"[DB] connect error: {e}", flush=True)
-        raise HTTPException(status_code=500, detail="db connection failed")
+        # 先回報錯誤訊息，方便在 Logs 看到真正原因
+        raise HTTPException(status_code=500, detail=f"db connection failed: {e}")
+
 
 # --- Oath 基礎 ---
 @app.post("/oath")
