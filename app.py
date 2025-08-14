@@ -1,11 +1,12 @@
-# app.py
+#20250814PM1716,雅
+# app.pPMy
 import os, json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, HTTPException
 from fastapi import FastAPI, Depends, Body
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
-from db import Base, engine
+from db import Base, engine, SessionLocal
 from models import Oath, Heartbeat, Event
 from deps import get_db
 
@@ -15,9 +16,18 @@ app = FastAPI()
 def on_startup():
     Base.metadata.create_all(bind=engine)
 
-@app.get("/health")
-def health():
-    return {"status": "ok", "time": datetime.now(timezone.utc).isoformat()}
+
+@app.get("/db/health")
+def db_health():
+    if SessionLocal is None:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not configured")
+    try:
+        with SessionLocal() as s:
+            s.execute("SELECT 1")
+        return {"status": "ok"}
+    except Exception as e:
+        print(f"[DB] connect error: {e}", flush=True)
+        raise HTTPException(status_code=500, detail="db connection failed")
 
 # --- Oath 基礎 ---
 @app.post("/oath")
