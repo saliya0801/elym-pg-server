@@ -10,7 +10,6 @@ from db import Base, engine, SessionLocal
 from models import Oath, Heartbeat, Event
 from deps import get_db
 
-
 app = FastAPI()
 
 @app.on_event("startup")
