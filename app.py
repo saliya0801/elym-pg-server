@@ -1,9 +1,9 @@
 #20250814PM2041,雅
 # app.pPMy
 from sqlalchemy import text
-import os, json
+import os, json, hmac
 from datetime import datetime, timezone
-from fastapi import FastAPI, Depends, Body, HTTPException
+from fastapi import FastAPI, Depends, Body, HTTPException, Request
 from fastapi.responses import JSONResponse, HTMLResponse
 from sqlalchemy.orm import Session
 
@@ -12,6 +12,18 @@ from models import Oath, Heartbeat, Event
 from deps import get_db
 
 app = FastAPI()
+
+def require_private_key(request: Request):
+    expected_key = os.getenv("ELYM_PG_PRIVATE_KEY", "")
+    supplied_key = request.headers.get("x-elym-private-key", "")
+
+    # Public web routes stay readable. Database-backed Elym state is closed
+    # unless a private key is explicitly configured by the owner.
+    if not expected_key:
+        raise HTTPException(status_code=503, detail="Private Elym API is disabled")
+    if not supplied_key or not hmac.compare_digest(supplied_key, expected_key):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return True
 
 @app.on_event("startup")
 def on_startup():
@@ -165,14 +177,17 @@ def db_health():
             # SQLAlchemy 2.0 規則：字串 SQL 要用 text(...)
             s.execute(text("SELECT 1"))
         return {"status": "ok"}
-    except Exception as e:
-        # 先回報錯誤訊息，方便在 Logs 看到真正原因
-        raise HTTPException(status_code=500, detail=f"db connection failed: {e}")
+    except Exception:
+        raise HTTPException(status_code=503, detail="database unavailable")
 
 
 # --- Oath 基礎 ---
 @app.post("/oath")
-def upsert_oath(content: str = Body(..., embed=True), db: Session = Depends(get_db)):
+def upsert_oath(
+    content: str = Body(..., embed=True),
+    db: Session = Depends(get_db),
+    _: bool = Depends(require_private_key),
+):
     oath = db.query(Oath).filter_by(name="baseline").first()
     if oath:
         oath.content = content
@@ -184,7 +199,10 @@ def upsert_oath(content: str = Body(..., embed=True), db: Session = Depends(get_
     return {"status": "ok", "oath_id": oath.id}
 
 @app.get("/oath")
-def get_oath(db: Session = Depends(get_db)):
+def get_oath(
+    db: Session = Depends(get_db),
+    _: bool = Depends(require_private_key),
+):
     oath = db.query(Oath).filter_by(name="baseline").first()
     if not oath:
         return JSONResponse({"status": "empty", "content": ""})
@@ -196,6 +214,7 @@ def post_heartbeat(
     note: str = Body("", embed=True),
     payload: dict | None = Body(None),
     db: Session = Depends(get_db),
+    _: bool = Depends(require_private_key),
 ):
     hb = Heartbeat(note=note, payload=payload or {})
     db.add(hb)
@@ -204,7 +223,10 @@ def post_heartbeat(
     return {"status": "ok", "id": hb.id}
 
 @app.get("/heartbeat/latest")
-def latest_heartbeat(db: Session = Depends(get_db)):
+def latest_heartbeat(
+    db: Session = Depends(get_db),
+    _: bool = Depends(require_private_key),
+):
     hb = db.query(Heartbeat).order_by(Heartbeat.id.desc()).first()
     if not hb:
         return JSONResponse({"status": "empty"})
@@ -223,6 +245,7 @@ def post_event(
     title: str = Body(..., embed=True),
     detail: str = Body("", embed=True),
     db: Session = Depends(get_db),
+    _: bool = Depends(require_private_key),
 ):
     ev = Event(tag=tag, title=title, detail=detail)
     db.add(ev)
